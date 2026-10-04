@@ -253,6 +253,7 @@ func registerGetBonusOffers(s *server.MCPServer, deps Deps) {
 			BonusPrice         float64 `json:"bonus_price"`
 			DiscountPercentage float64 `json:"discount_percentage,omitempty"`
 			BonusMechanism     string  `json:"bonus_mechanism,omitempty"`
+			ImageURL           string  `json:"image_url,omitempty"`
 		}
 		results := make([]item, 0)
 		for _, p := range products {
@@ -270,6 +271,9 @@ func registerGetBonusOffers(s *server.MCPServer, deps Deps) {
 				OriginalPrice:  p.Price.Was,
 				BonusPrice:     p.Price.Now,
 				BonusMechanism: p.BonusMechanism,
+			}
+			if len(p.Images) > 0 {
+				it.ImageURL = p.Images[0].URL
 			}
 			if p.Price.Was > 0 && p.Price.Now > 0 {
 				it.DiscountPercentage = (1 - p.Price.Now/p.Price.Was) * 100
