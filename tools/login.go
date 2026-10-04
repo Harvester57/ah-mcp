@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 
 	appie "github.com/gwillem/appie-go"
@@ -91,15 +92,22 @@ func RegisterLoginTool(s *server.MCPServer, deps Deps) {
 		mcp.WithString("callback_host",
 			mcp.Description("Optional base URL for the OAuth callback proxy (e.g. http://192.168.50.170:9876). Overrides AH_CALLBACK_HOST."),
 		),
+		mcp.WithBoolean("reset",
+			mcp.Description("Optional flag to cancel any existing flow and start a new one."),
+		),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		callbackHost := deps.CallbackHost
+		reset := false
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
 			if ch, ok := args["callback_host"].(string); ok && ch != "" {
 				callbackHost = ch
 			}
+			if r, ok := args["reset"].(bool); ok {
+				reset = r
+			}
 		}
-		return handleLogin(ctx, deps, callbackHost)
+		return handleLogin(ctx, deps, callbackHost, reset)
 	})
 }
 
@@ -141,7 +149,7 @@ func loginSuccess(ctx context.Context, deps Deps) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(fmt.Sprintf("Login successful! Connected as %s %s.", member.FirstName, member.LastName)), nil
 }
 
-func handleLogin(ctx context.Context, deps Deps, callbackHost string) (*mcp.CallToolResult, error) {
+func handleLogin(ctx context.Context, deps Deps, callbackHost string, reset bool) (*mcp.CallToolResult, error) {
 	// Already authenticated — report immediately.
 	if deps.IsAuthenticated() {
 		c, err := deps.GetClient()
@@ -156,6 +164,11 @@ func handleLogin(ctx context.Context, deps Deps, callbackHost string) (*mcp.Call
 	}
 
 	oauthFlow.Lock()
+
+	// Invalidate stale flow if explicitly requested or if callbackHost changed
+	if oauthFlow.active && (reset || (callbackHost != "" && oauthFlow.loginURL != "" && !strings.HasPrefix(oauthFlow.loginURL, callbackHost))) {
+		oauthFlow.active = false
+	}
 
 	// Remote mode — second call: check whether the browser callback arrived.
 	if oauthFlow.active {

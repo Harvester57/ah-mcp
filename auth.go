@@ -355,7 +355,6 @@ func rewriteOAuthResponse(resp *http.Response, localOrigin, targetHost string) e
 	if err != nil {
 		return err
 	}
-	body = bytes.ReplaceAll(body, []byte("appie://login-exit"), []byte(localOrigin+"/callback"))
 	body = bytes.ReplaceAll(body, []byte("https://"+targetHost), []byte(localOrigin))
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
