@@ -29,10 +29,18 @@ const (
 
 	loginSuccessHTML = `<!DOCTYPE html>
 <html><head><title>Login Successful</title></head>
-<body style="font-family:system-ui;max-width:500px;margin:80px auto;text-align:center">
-<h1>Login successful!</h1>
-<p>You can close this tab and return to your AI assistant.</p>
-<script>setTimeout(function(){window.close()},1000)</script>
+<body style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:60px auto;padding:24px;text-align:center;background:#121212;color:#f0f0f0;border-radius:12px">
+<h1 style="color:#00a1e1">✓ Login Successful!</h1>
+<p style="font-size:1.1rem;color:#ccc">Your Albert Heijn account is now connected to the Groceries Dashboard.</p>
+<p style="color:#888;font-size:0.9rem">This window will close automatically in a moment.</p>
+<script>
+try {
+  if (window.opener) {
+    window.opener.postMessage({ type: 'AH_LOGIN_SUCCESS' }, '*');
+  }
+} catch(e) {}
+setTimeout(function(){ window.close(); }, 1200);
+</script>
 </body></html>`
 )
 
@@ -101,7 +109,7 @@ func SaveTokens(path string, tf *tokenFile) error {
 	}
 	// Write to temp file in same directory, then rename for atomicity.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return fmt.Errorf("write temp tokens: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

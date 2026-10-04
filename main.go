@@ -90,8 +90,11 @@ func main() {
 		IsAuthenticated: func() bool {
 			return IsAuthenticated(tokensPath)
 		},
-		StartOAuthFlow: func(ctx context.Context) (string, <-chan error, error) {
-			return StartOAuthFlow(ctx, callbackHost, callbackPort, tokensPath)
+		StartOAuthFlow: func(ctx context.Context, cbHost string) (string, <-chan error, error) {
+			if cbHost == "" {
+				cbHost = callbackHost
+			}
+			return StartOAuthFlow(ctx, cbHost, callbackPort, tokensPath)
 		},
 		RefreshIfNeeded: func(ctx context.Context) error {
 			return RefreshIfNeeded(ctx, tokensPath)

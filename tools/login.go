@@ -48,7 +48,7 @@ type Deps struct {
 	// IsAuthenticated checks whether valid tokens are on disk.
 	IsAuthenticated func() bool
 	// StartOAuthFlow starts the proxy and returns (loginURL, doneChan, err).
-	StartOAuthFlow func(ctx context.Context) (string, <-chan error, error)
+	StartOAuthFlow func(ctx context.Context, callbackHost string) (string, <-chan error, error)
 	// RefreshIfNeeded refreshes the access token if it is close to expiry.
 	RefreshIfNeeded func(ctx context.Context) error
 	// Server is the MCP server instance (kept for future use).
@@ -88,9 +88,18 @@ func RegisterLoginTool(s *server.MCPServer, deps Deps) {
 				"Remote mode: returns a URL to open manually, then call ah_login again to confirm. "+
 				"Already authenticated? Returns your name immediately.",
 		),
+		mcp.WithString("callback_host",
+			mcp.Description("Optional base URL for the OAuth callback proxy (e.g. http://192.168.50.170:9876). Overrides AH_CALLBACK_HOST."),
+		),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return handleLogin(ctx, deps)
+		callbackHost := deps.CallbackHost
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if ch, ok := args["callback_host"].(string); ok && ch != "" {
+				callbackHost = ch
+			}
+		}
+		return handleLogin(ctx, deps, callbackHost)
 	})
 }
 
@@ -132,7 +141,7 @@ func loginSuccess(ctx context.Context, deps Deps) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(fmt.Sprintf("Login successful! Connected as %s %s.", member.FirstName, member.LastName)), nil
 }
 
-func handleLogin(ctx context.Context, deps Deps) (*mcp.CallToolResult, error) {
+func handleLogin(ctx context.Context, deps Deps, callbackHost string) (*mcp.CallToolResult, error) {
 	// Already authenticated — report immediately.
 	if deps.IsAuthenticated() {
 		c, err := deps.GetClient()
@@ -169,7 +178,7 @@ func handleLogin(ctx context.Context, deps Deps) (*mcp.CallToolResult, error) {
 	}
 
 	// Start the OAuth proxy.
-	loginURL, done, err := deps.StartOAuthFlow(ctx)
+	loginURL, done, err := deps.StartOAuthFlow(ctx, callbackHost)
 	if err != nil {
 		oauthFlow.Unlock()
 		return errResult(fmt.Sprintf("Failed to start OAuth flow: %v", err)), nil
