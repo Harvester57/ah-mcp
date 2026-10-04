@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -276,7 +277,7 @@ func registerGetBonusOffers(s *server.MCPServer, deps Deps) {
 				it.ImageURL = p.Images[0].URL
 			}
 			if p.Price.Was > 0 && p.Price.Now > 0 {
-				it.DiscountPercentage = (1 - p.Price.Now/p.Price.Was) * 100
+				it.DiscountPercentage = math.Round((1 - p.Price.Now/p.Price.Was) * 100)
 			}
 			results = append(results, it)
 		}
