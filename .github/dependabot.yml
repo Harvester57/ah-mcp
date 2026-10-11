@@ -49,7 +49,6 @@ updates:
       prefix: "deps(go)"
       include: "scope"
     open-pull-requests-limit: 10
-    versioning-strategy: "increase-if-necessary"
     labels:
       - "dependencies"
       - "go"
