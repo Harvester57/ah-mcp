@@ -29,11 +29,12 @@ func GetClient() (*appie.Client, error) {
 func ReloadClient() (*appie.Client, error) {
 	path := TokensPath()
 	c, err := appie.NewWithConfig(path)
+	clientMu.Lock()
+	defer clientMu.Unlock()
 	if err != nil {
+		globalClient = nil
 		return nil, fmt.Errorf("create appie client: %w", err)
 	}
-	clientMu.Lock()
 	globalClient = c
-	clientMu.Unlock()
 	return c, nil
 }

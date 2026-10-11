@@ -121,9 +121,6 @@ func registerLogout(s *server.MCPServer, deps Deps) {
 		),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if !deps.IsAuthenticated() {
-			return mcp.NewToolResultText("Already logged out (no active session)."), nil
-		}
 		if err := os.Remove(deps.TokensPath); err != nil && !os.IsNotExist(err) {
 			return errResult(fmt.Sprintf("Failed to remove tokens: %v", err)), nil
 		}
