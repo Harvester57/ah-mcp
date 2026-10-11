@@ -70,10 +70,25 @@ var oauthState struct {
 }
 
 // TokensPath returns the path for storing OAuth tokens.
-// Override with AH_TOKENS_PATH env var; otherwise uses XDG-compliant location.
+// Override with AH_TOKENS_PATH env var; otherwise uses XDG-compliant location or local project data.
 func TokensPath() string {
 	if p := os.Getenv("AH_TOKENS_PATH"); p != "" {
 		return p
+	}
+	candidates := []string{
+		filepath.Join("backend", "data", "tokens.json"),
+		filepath.Join("..", "backend", "data", "tokens.json"),
+		filepath.Join("data", "tokens.json"),
+		filepath.Join("..", "data", "tokens.json"),
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			abs, err := filepath.Abs(c)
+			if err == nil {
+				return abs
+			}
+			return c
+		}
 	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
