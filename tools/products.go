@@ -26,6 +26,7 @@ func RegisterProductTools(s *server.MCPServer, deps Deps) {
 	registerGetBonusGroupProducts(s, deps)
 	registerGetLastChanceItems(s, deps)
 	registerSearchStores(s, deps)
+	registerGetBonusBox(s, deps)
 }
 
 // --- ah_search_products ---
@@ -992,3 +993,301 @@ func registerSearchProductsFiltered(s *server.MCPServer, deps Deps) {
 		return jsonResult(results)
 	})
 }
+
+// --- ah_get_bonus_box ---
+
+const fetchBonusBoxOffersQuery = `query FetchBonusBoxOffers(
+  $filterSet: PromotionsFilterSet,
+  $periodStart: String,
+  $periodEnd: String,
+  $forcePromotionVisibility: Boolean = true,
+  $filterUnavailableProducts: Boolean = false,
+  $states: [BonusSegmentState!]
+) {
+  bonusPersonalPromotionBundles(validOn: $periodStart) {
+    maximumActivations
+  }
+  bonusPromotions(
+    filterSet: $filterSet
+    input: {
+      periodStart: $periodStart
+      periodEnd: $periodEnd
+      filterUnavailableProducts: $filterUnavailableProducts
+      forcePromotionVisibility: $forcePromotionVisibility
+      states: $states
+    }
+  ) {
+    id
+    hqId
+    title
+    activationStatus
+    category
+    promotionType
+    segmentType
+    periodStart
+    periodEnd
+    rawPromotionLabels { mechanism price defaultDescription }
+    price {
+      now { amount }
+      was { amount }
+    }
+    products {
+      id
+      title
+      salesUnitSize
+      imagePack {
+        large { url width height }
+        small { url width height }
+      }
+    }
+  }
+}`
+
+type bonusBoxPeriodInfo struct {
+	Start string
+	End   string
+}
+
+func fetchBonusPeriodsFromAH(ctx context.Context, c *appie.Client) ([]bonusBoxPeriodInfo, error) {
+	var meta struct {
+		Periods []struct {
+			BonusStartDate string `json:"bonusStartDate"`
+			BonusEndDate   string `json:"bonusEndDate"`
+		} `json:"periods"`
+	}
+	if err := c.DoRequest(ctx, "GET", "/mobile-services/bonuspage/v3/metadata", nil, &meta); err != nil {
+		return nil, err
+	}
+	out := make([]bonusBoxPeriodInfo, 0, len(meta.Periods))
+	for _, p := range meta.Periods {
+		out = append(out, bonusBoxPeriodInfo{Start: p.BonusStartDate, End: p.BonusEndDate})
+	}
+	return out, nil
+}
+
+func registerGetBonusBox(s *server.MCPServer, deps Deps) {
+	tool := mcp.NewTool("ah_get_bonus_box",
+		mcp.WithTitleAnnotation("Albert Heijn: Personalized Bonus Box Deals"),
+		mcp.WithDescription(
+			"Get authenticated Albert Heijn personalized Bonus Box deals for the current or upcoming week. "+
+				"Returns active offers with real product titles, original prices, bonus prices, discount descriptions, "+
+				"activation statuses, and product image URLs. Set period='next' for upcoming deals, or 'current' for this week.",
+		),
+		mcp.WithString("period",
+			mcp.Description("Bonus Box period: 'current' (active this week) or 'next' (upcoming starting next Monday). Default is 'current'."),
+		),
+	)
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if !deps.IsAuthenticated() {
+			return notAuthResult(), nil
+		}
+		if err := refreshTokens(ctx, deps); err != nil {
+			return errResult(fmt.Sprintf("Token refresh failed: %v", err)), nil
+		}
+		c, err := deps.GetClient()
+		if err != nil {
+			return errResult(fmt.Sprintf("Client error: %v", err)), nil
+		}
+
+		periodParam := strings.ToLower(req.GetString("period", "current"))
+		wantNext := periodParam == "next"
+
+		periods, _ := fetchBonusPeriodsFromAH(ctx, c)
+
+		today := time.Now().Format("2006-01-02")
+		var pStart, pEnd string
+		if wantNext {
+			for _, p := range periods {
+				if p.Start > today && (pStart == "" || p.Start < pStart) {
+					pStart = p.Start
+					pEnd = p.End
+				}
+			}
+		} else {
+			for _, p := range periods {
+				if today >= p.Start && today <= p.End {
+					pStart = p.Start
+					pEnd = p.End
+					break
+				}
+			}
+		}
+
+		// Fallback date calculation if metadata didn't match
+		if pStart == "" || pEnd == "" {
+			now := time.Now()
+			weekday := int(now.Weekday())
+			daysToMonday := 1 - weekday
+			if weekday == 0 {
+				daysToMonday = -6
+			}
+			curMonday := now.AddDate(0, 0, daysToMonday)
+			if wantNext {
+				curMonday = curMonday.AddDate(0, 0, 7)
+			}
+			curSunday := curMonday.AddDate(0, 0, 6)
+			pStart = curMonday.Format("2006-01-02")
+			pEnd = curSunday.Format("2006-01-02")
+		}
+
+		vars := map[string]any{
+			"filterSet":                 "APP_BONUS_BOX",
+			"periodStart":               pStart,
+			"periodEnd":                 pEnd,
+			"states":                    []string{"ACTIVATABLE", "ACTIVATED"},
+			"forcePromotionVisibility":  true,
+			"filterUnavailableProducts": false,
+		}
+
+		var resp struct {
+			BonusPersonalPromotionBundles []struct {
+				MaximumActivations int `json:"maximumActivations"`
+			} `json:"bonusPersonalPromotionBundles"`
+			BonusPromotions []struct {
+				ID                 string `json:"id"`
+				HqID               int    `json:"hqId"`
+				Title              string `json:"title"`
+				ActivationStatus   string `json:"activationStatus"`
+				Category           string `json:"category"`
+				PromotionType      string `json:"promotionType"`
+				SegmentType        string `json:"segmentType"`
+				PeriodStart        string `json:"periodStart"`
+				PeriodEnd          string `json:"periodEnd"`
+				RawPromotionLabels []struct {
+					Mechanism          string  `json:"mechanism"`
+					Price              float64 `json:"price"`
+					DefaultDescription string  `json:"defaultDescription"`
+				} `json:"rawPromotionLabels"`
+				Price struct {
+					Now struct {
+						Amount float64 `json:"amount"`
+					} `json:"now"`
+					Was struct {
+						Amount float64 `json:"amount"`
+					} `json:"was"`
+				} `json:"price"`
+				Products []struct {
+					ID            int    `json:"id"`
+					Title         string `json:"title"`
+					SalesUnitSize string `json:"salesUnitSize"`
+					ImagePack     []struct {
+						Large *struct {
+							URL string `json:"url"`
+						} `json:"large"`
+						Small *struct {
+							URL string `json:"url"`
+						} `json:"small"`
+					} `json:"imagePack"`
+				} `json:"products"`
+			} `json:"bonusPromotions"`
+		}
+
+		if err := c.DoGraphQL(ctx, fetchBonusBoxOffersQuery, vars, &resp); err != nil {
+			return errResult(fmt.Sprintf("Bonus Box GraphQL query failed: %v", err)), nil
+		}
+
+		type dealItem struct {
+			ID            string  `json:"id"`
+			Title         string  `json:"title"`
+			Category      string  `json:"category,omitempty"`
+			DiscountText  string  `json:"discount_text"`
+			PromoType     string  `json:"promo_type"`
+			PromoLabel    string  `json:"promo_label"`
+			StandardPrice float64 `json:"standard_price"`
+			BonusPrice    float64 `json:"bonus_price"`
+			CurrentPrice  float64 `json:"current_price"`
+			Savings       float64 `json:"savings"`
+			Unit          string  `json:"unit,omitempty"`
+			ImageURL      string  `json:"image_url,omitempty"`
+			IsActivated   bool    `json:"is_activated"`
+			IsBonus       bool    `json:"is_bonus"`
+			Period        string  `json:"period"`
+			ValidFrom     string  `json:"valid_from"`
+			ValidTo       string  `json:"valid_to"`
+			AhProductID   string  `json:"ah_product_id,omitempty"`
+		}
+
+		deals := make([]dealItem, 0, len(resp.BonusPromotions))
+		for _, promo := range resp.BonusPromotions {
+			bonusPrice := promo.Price.Now.Amount
+			standardPrice := promo.Price.Was.Amount
+			if standardPrice == 0 && bonusPrice > 0 {
+				standardPrice = bonusPrice
+			}
+
+			discountText := ""
+			if len(promo.RawPromotionLabels) > 0 {
+				label := promo.RawPromotionLabels[0]
+				discountText = label.DefaultDescription
+				if discountText == "" {
+					discountText = label.Mechanism
+				}
+			}
+			if discountText == "" {
+				discountText = "Bonus Box"
+			}
+
+			var imageURL string
+			var unit string
+			var ahProductID string
+
+			if len(promo.Products) > 0 {
+				firstProd := promo.Products[0]
+				ahProductID = fmt.Sprintf("wi%d", firstProd.ID)
+				unit = firstProd.SalesUnitSize
+				for _, pack := range firstProd.ImagePack {
+					if pack.Small != nil && pack.Small.URL != "" {
+						imageURL = pack.Small.URL
+						break
+					} else if pack.Large != nil && pack.Large.URL != "" {
+						imageURL = pack.Large.URL
+						break
+					}
+				}
+			}
+
+			savings := 0.0
+			if standardPrice > bonusPrice {
+				savings = math.Round((standardPrice-bonusPrice)*100) / 100
+			}
+
+			deals = append(deals, dealItem{
+				ID:            fmt.Sprintf("box-%s", promo.ID),
+				Title:         promo.Title,
+				Category:      promo.Category,
+				DiscountText:  discountText,
+				PromoType:     "Bonus Box",
+				PromoLabel:    "Bonus Box",
+				StandardPrice: standardPrice,
+				BonusPrice:    bonusPrice,
+				CurrentPrice:  bonusPrice,
+				Savings:       savings,
+				Unit:          unit,
+				ImageURL:      imageURL,
+				IsActivated:   promo.ActivationStatus == "ACTIVATED",
+				IsBonus:       true,
+				Period:        periodParam,
+				ValidFrom:     pStart,
+				ValidTo:       pEnd,
+				AhProductID:   ahProductID,
+			})
+		}
+
+		type resultType struct {
+			Period    string     `json:"period"`
+			ValidFrom string     `json:"valid_from"`
+			ValidTo   string     `json:"valid_to"`
+			Count     int        `json:"count"`
+			Deals     []dealItem `json:"deals"`
+		}
+
+		return jsonResult(resultType{
+			Period:    periodParam,
+			ValidFrom: pStart,
+			ValidTo:   pEnd,
+			Count:     len(deals),
+			Deals:     deals,
+		})
+	})
+}
+
