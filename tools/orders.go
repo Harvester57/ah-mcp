@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -459,10 +460,12 @@ func registerGetReceiptDetails(s *server.MCPServer, deps Deps) {
 			Amount float64 `json:"amount"`
 		}
 		type result struct {
-			ID        string          `json:"id"`
-			Items     []itemEntry     `json:"items"`
-			Discounts []discountEntry `json:"discounts,omitempty"`
-			Payments  []paymentEntry  `json:"payments,omitempty"`
+			ID            string          `json:"id"`
+			Items         []itemEntry     `json:"items"`
+			Discounts     []discountEntry `json:"discounts,omitempty"`
+			Payments      []paymentEntry  `json:"payments,omitempty"`
+			TotalDiscount float64         `json:"total_discount"`
+			TotalAmount   float64         `json:"total_amount"`
 		}
 
 		items := make([]itemEntry, 0, len(receipt.Items))
@@ -474,20 +477,26 @@ func registerGetReceiptDetails(s *server.MCPServer, deps Deps) {
 				Total:     it.Amount,
 			})
 		}
+		var totalDiscount float64
 		discounts := make([]discountEntry, 0, len(receipt.Discounts))
 		for _, d := range receipt.Discounts {
 			discounts = append(discounts, discountEntry{Name: d.Name, Amount: d.Amount})
+			totalDiscount += math.Abs(d.Amount)
 		}
+		var totalPayment float64
 		payments := make([]paymentEntry, 0, len(receipt.Payments))
 		for _, p := range receipt.Payments {
 			payments = append(payments, paymentEntry{Method: p.Method, Amount: p.Amount})
+			totalPayment += p.Amount
 		}
 
 		return jsonResult(result{
-			ID:        receipt.TransactionID,
-			Items:     items,
-			Discounts: discounts,
-			Payments:  payments,
+			ID:            receipt.TransactionID,
+			Items:         items,
+			Discounts:     discounts,
+			Payments:      payments,
+			TotalDiscount: math.Round(totalDiscount*100) / 100,
+			TotalAmount:   math.Round(totalPayment*100) / 100,
 		})
 	})
 }
