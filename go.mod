@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gwillem/appie-go v0.0.12
-	github.com/mark3labs/mcp-go v1.2.1
+	github.com/mark3labs/mcp-go v1.3.0
 )
 
 require (
